@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "a0-worktree-plugin: isolated git worktrees as Agent Zero projects"
+authors:
+  # Opsec: an entity with just `name` (alias) — never real given/family names.
+  - name: "King0James0"
+type: software
+license: MIT
+repository-code: "https://github.com/King0James0/a0-worktree-plugin"
+url: "https://github.com/King0James0/a0-worktree-plugin"
+year: 2026

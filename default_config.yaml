@@ -1,0 +1,5 @@
+# A0 Worktree defaults.
+
+# A0 Secret name holding a git token, used ONLY when cloning a PRIVATE remote URL as a project
+# (public remotes and local repos/projects need no token). Read at call time, never stored.
+git_token_secret: GITHUB_TOKEN
