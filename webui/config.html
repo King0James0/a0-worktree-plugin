@@ -1,51 +1,59 @@
 <html>
-<head><title>A0 Worktree</title></head>
+<head>
+  <title>A0 Worktree Settings</title>
+  <!-- Schema + logic live in config-store.js (a real .js file) so there are NO HTML-attribute
+       quoting limits here. RULE: inside any Alpine attribute use ONLY single quotes for JS strings —
+       a raw " terminates the attribute during HTML parsing and silently blanks the panel.
+       Uses A0's built-in .field / .section-* classes so it matches the rest of Settings (font/theme). -->
+  <script type="module">
+    import { store } from "/plugins/a0_worktree/webui/config-store.js";
+  </script>
+  <style>
+    .a0wt-field.safety .field-title::after { content: " \26A0"; color: var(--color-warning, #e0a800); }
+  </style>
+</head>
 <body>
-<div x-data>
-  <template x-if="config">
-    <div>
-      <div class="section-title">A0 Worktree — per-chat workspace</div>
-      <div class="section-description">
-        Worktree isolation gives a chat (or a swarm subagent) its own checkout of a repo as a
-        project. The option below is a separate, lightweight isolation for everyday chats.
-      </div>
-
-      <div class="field">
-        <div class="field-label">
-          <div class="field-title">Isolate each chat's working directory</div>
-          <div class="field-description">
-            When on, every chat that has no explicit project gets its own working directory at
-            <code>usr/chats/&lt;chat_id&gt;/workdir</code> instead of the shared <code>usr/workdir</code>.
-            The chat's code execution, the file list shown to the agent, and saved office documents
-            all resolve there, so chats no longer see each other's scratch files. Files live with the
-            chat and are removed when the chat is. Real projects and worktrees are never affected.
-            Takes effect immediately. Default off.
-          </div>
+  <!-- $store.a0wtCfg = the schema/helpers (this plugin); `config` = the live settings (A0 provides). -->
+  <template x-if="$store.a0wtCfg">
+    <div x-data x-init="$store.a0wtCfg.init()">
+      <template x-if="config">
+        <div>
+          <template x-for="sec in $store.a0wtCfg.sections" :key="sec.title">
+            <div>
+              <div class="section-title" x-text="sec.title"></div>
+              <div class="section-description" x-show="sec.desc" x-text="sec.desc"></div>
+              <template x-for="f in sec.fields" :key="f.k">
+                <div class="field a0wt-field" :class="{ safety: f.safety }" x-show="$store.a0wtCfg.shown(f, config)">
+                  <div class="field-label">
+                    <div class="field-title" x-text="f.lbl"></div>
+                    <div class="field-description" x-show="f.h" x-text="f.h"></div>
+                  </div>
+                  <div class="field-control">
+                    <template x-if="f.t === 'bool'">
+                      <label class="toggle"><input type="checkbox" x-model="config[f.k]" /><span class="toggler"></span></label>
+                    </template>
+                    <template x-if="f.t === 'int'">
+                      <input type="number" step="1" x-model.number="config[f.k]" />
+                    </template>
+                    <template x-if="f.t === 'float'">
+                      <input type="number" step="any" x-model.number="config[f.k]" />
+                    </template>
+                    <template x-if="f.t === 'text'">
+                      <input type="text" x-model="config[f.k]" />
+                    </template>
+                    <template x-if="f.t === 'enum'">
+                      <select x-model="config[f.k]" x-init="$nextTick(() => { if (config[f.k] !== undefined) $el.value = config[f.k] })">
+                        <template x-for="o in f.opts" :key="o"><option :value="o" x-text="o"></option></template>
+                      </select>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
         </div>
-        <div class="field-control">
-          <label class="toggle">
-            <input type="checkbox" x-model="config.isolate_chat_workdir"
-              x-init="if (config.isolate_chat_workdir === undefined || config.isolate_chat_workdir === null) config.isolate_chat_workdir = false" />
-            <span class="toggler"></span>
-          </label>
-        </div>
-      </div>
-
-      <div class="field">
-        <div class="field-label">
-          <div class="field-title">Git token secret name</div>
-          <div class="field-description">
-            Name of an A0 Secret holding a git token, used only when cloning a private remote URL as
-            a project. Public remotes and local repos need no token. Read at call time, never stored.
-          </div>
-        </div>
-        <div class="field-control">
-          <input type="text" class="text-input" x-model="config.git_token_secret"
-            x-init="if (config.git_token_secret === undefined || config.git_token_secret === null) config.git_token_secret = 'GITHUB_TOKEN'" />
-        </div>
-      </div>
+      </template>
     </div>
   </template>
-</div>
 </body>
 </html>

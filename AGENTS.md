@@ -54,6 +54,7 @@ that resolves a flagged chat's workdir to `usr/chats/<chat_id>/workdir`. Publish
   `tests/` (`drift_check.py` config-parity + `verify_worktree.py` / `verify_isolation.py` /
   `verify_installed.py`) → keep `default_config.yaml` ↔ `webui/config.html` keys in sync (drift 0/0).
   Bump `plugin.yaml` `version` on an increment.
+- **Keep THIS file current.** Update this AGENTS.md in the SAME change whenever you alter a HARD INVARIANT, a cited path/seam/A0 mechanic, or what this plugin is — a stale contract MISLEADS (worse than none). Routine fixes/features that don't change the contract don't touch it.
 - **Validate in a THROWAWAY, never live-install.** Snapshot/commit the instance into an isolated
   container; never wrap resolvers on or create worktrees against the live store. Verify the config
   screen renders in a real browser. The maintainer installs the built artifact via the UX.
