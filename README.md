@@ -73,6 +73,25 @@ The two paths differ in cleanup, by design:
 So installing this plugin **upgrades swarm's `isolated` engine**; it does not change swarm's `none`
 or `inherit` modes, and `isolated` is never applied automatically — you opt in via swarm's setting.
 
+## Per-chat workdir isolation (opt-in)
+
+Separately from the worktree tool, this plugin can give **every chat its own working directory** so
+chats stop sharing — and polluting — the one global `usr/workdir`. Turn on **Isolate each chat's
+working directory** in the plugin settings (default **off**). While it's on, any chat that has no
+explicit project gets its own folder at `usr/chats/<chat_id>/workdir`, and the chat's **code
+execution**, the **file list shown to the agent**, and **saved office documents** all resolve there.
+So one chat never sees another's scratch files, and a chat's files live with it — when the chat is
+removed, its workdir goes too (no buildup of stale files).
+
+It's a clean, reversible runtime behavior: it does **not** create real projects (nothing appears in
+the project list/selector or in project-grouped sidebars), it leaves real projects and worktrees
+completely untouched, and toggling it takes effect immediately with no restart. Turning it off — or
+uninstalling the plugin — returns A0 to the shared workdir with nothing left behind.
+
+> Technical note: this works by wrapping A0's project-path resolver at runtime, a deliberate
+> dependency on framework internals. Every path is fail-safe — on any error (or a future A0 change),
+> it falls straight through to A0's normal shared-workdir behavior, so nothing breaks.
+
 ## Configuration
 
 `default_config.yaml`:
@@ -80,6 +99,7 @@ or `inherit` modes, and `isolated` is never applied automatically — you opt in
 | Key | Default | Meaning |
 |---|---|---|
 | `git_token_secret` | `GITHUB_TOKEN` | A0 Secret name holding a git token, used only when cloning a **private** remote URL. Read at call time, never stored. |
+| `isolate_chat_workdir` | `false` | Opt-in. When on, each chat with no explicit project gets its own `usr/chats/<chat_id>/workdir`. Effective immediately; real projects/worktrees unaffected. |
 
 ## Uninstalling
 

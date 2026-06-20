@@ -22,18 +22,32 @@ def _log(msg: str) -> None:
 
 
 def ensure() -> None:
-    """Idempotent, best-effort. a0_worktree has nothing to install; just confirm git is available."""
+    """Idempotent, best-effort. a0_worktree has nothing to install; just confirm git is available
+    and (re)install the per-chat workdir-isolation wrap (a no-op pass-through while the toggle is
+    off; see helpers/isolation.py)."""
     try:
         if shutil.which("git") is None:
             _log("WARNING: git not found on PATH — a0_worktree needs git to create worktrees.")
     except Exception as e:
         _log(f"ensure() check failed (non-fatal): {e}")
+    try:
+        from usr.plugins.a0_worktree.helpers import isolation
+
+        isolation.install_wrap()
+    except Exception as e:
+        _log(f"ensure() isolation wrap failed (non-fatal): {e}")
 
 
 def cleanup() -> None:
     """On uninstall, reclaim the worktree checkouts we created (branches are always preserved so
     no work is lost). Out-of-tree state lives only as worktrees under usr/projects/<key>, each
     carrying our ownership marker — we touch nothing else."""
+    try:
+        from usr.plugins.a0_worktree.helpers import isolation
+
+        isolation.uninstall_wrap()
+    except Exception as e:
+        _log(f"cleanup() isolation unwrap failed (non-fatal): {e}")
     try:
         from usr.plugins.a0_worktree.helpers import worktree
 
