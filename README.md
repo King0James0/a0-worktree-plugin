@@ -92,6 +92,10 @@ uninstalling the plugin — returns A0 to the shared workdir with nothing left b
 > dependency on framework internals. Every path is fail-safe — on any error (or a future A0 change),
 > it falls straight through to A0's normal shared-workdir behavior, so nothing breaks.
 
+> Note on timing: enabling isolation takes effect for a chat's terminal on its next session start,
+> reset, or container restart; a chat with a live terminal at enable-time keeps the shared workdir
+> until then. New chats isolate immediately.
+
 ## Configuration
 
 `default_config.yaml`:
