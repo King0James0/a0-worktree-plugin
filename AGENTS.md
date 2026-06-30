@@ -38,12 +38,25 @@ that resolves a flagged chat's workdir to `usr/chats/<chat_id>/workdir`. Publish
    `usr/chats/<id>/workdir`. Never interpolate an unvalidated context id into a path (traversal).
    The synthetic project name is in-memory only — it must NEVER be persisted (no project list/sidebar leak).
 6. **The git token is read at call time, never stored.** `_secret()` loads from A0 Secrets by the
-   `git_token_secret` config name (default `GITHUB_TOKEN`), used ONLY to clone a PRIVATE remote URL.
-   Never log it, never write it to the marker/header/meta, never embed it in a shipped file.
+   `worktree.DEFAULT_TOKEN_SECRET` constant (`GITHUB_TOKEN`; a legacy saved `git_token_secret` key is
+   still honoured), used ONLY to clone a PRIVATE remote URL. It is NOT a config field (local/public
+   repos need no token). Never log it, never write it to the marker/header/meta, never embed it in a
+   shipped file.
 7. **The contract surface (`helpers/contract.py`) is a frozen API.** `create_worktree` /
    `remove_worktree` / `CONTRACT_VERSION` are what other plugins pin to. Keep it small and
    backward-compatible; bump `CONTRACT_VERSION` ONLY for a breaking change. Don't rename or
    re-signature these without a version bump.
+8. **Maintenance removes ONLY our footprint and NEVER resurrects a deleted chat.**
+   `helpers/maintenance.py` (driven by the throttled `job_loop/_60_…` extension) sweeps a stranded
+   `usr/chats/<id>/` folder ONLY when ALL hold: it has a `workdir/` (our isolation footprint) AND no
+   `chat.json` AND its id is not in `AgentContext.all()` AND it is older than `ORPHAN_GRACE_SECS`.
+   NEVER enumerate-and-remove chat folders; NEVER touch a folder containing a `chat.json`; when
+   liveness is unknown (`_live_ids()` → None) the sweep MUST stand its hand. And `_chat_workdir`'s
+   **liveness guard** must NOT create a workdir for an id whose chat folder is gone AND has no live
+   context — re-creating it strands an orphan nothing reaps (the guard fails SAFE to True so a real
+   chat is never denied). The optional `by-name/` symlink farm is READ-ONLY: it only ever creates
+   symlinks under `usr/chats/by-name/`, never renames/moves/writes a real id-keyed folder; rebuild
+   wipes that one dir (rmtree unlinks symlinks without following them into real chats).
 
 ## Build discipline
 - **Framework-agnostic where it can be; one A0 seam per surface.** `helpers/worktree.py` and
@@ -82,3 +95,14 @@ that resolves a flagged chat's workdir to `usr/chats/<chat_id>/workdir`. Publish
 - Worktree registration uses `helpers.projects` (`get_project_folder`, `create_project_meta_folders`,
   `save_project_header`, `activate_project`, `clone_git_project`, `delete_project`) — confirm these
   signatures against the live instance before relying on them.
+- **Chat reaping is context-driven, never directory-driven.** A chat persists at `usr/chats/<id>/`
+  (folder = `AgentContext.generate_id()`, an 8-char random token; the title is the mutable `name`
+  field inside `chat.json`). Delete = `chat_remove` → `AgentContext.remove` + `persist_chat.remove_chat`
+  (`delete_dir` of the whole folder). The hourly API-chat reaper (`job_loop/_20_cleanup_expired_api_chats`)
+  iterates `AgentContext.all()` and only touches contexts with `lifetime_hours` set (webui/Telegram
+  chats have none → never auto-reaped). `load_tmp_chats()` keys off `chat.json` — a folder without one
+  never loads and is invisible to all of the above. That is exactly why maintenance (invariant 8) is
+  needed: it's the only thing that reconciles the *directory* against live contexts.
+- Maintenance seam: a `job_loop` extension is `async def execute(self, **kwargs)` and runs every loop
+  tick — self-throttle with a class `_last_run` timestamp (mirrors the core `_20` reaper). Liveness =
+  `AgentContext.get(id)` / `AgentContext.all()` (import `from agent import AgentContext`).

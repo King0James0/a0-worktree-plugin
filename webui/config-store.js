@@ -19,8 +19,8 @@ export const store = createStore("a0wtCfg", {
       fields: [
         { k: "isolate_chat_workdir", t: "bool", lbl: "Isolate each chat's working directory",
           h: "When on, every chat that has no explicit project gets its own working directory at usr/chats/<chat_id>/workdir instead of the shared usr/workdir. The chat's code execution, the file list shown to the agent, and saved office documents all resolve there, so chats no longer see each other's scratch files. Files live with the chat and are removed when the chat is. Real projects and worktrees are never affected. Takes effect immediately. Default off." },
-        { k: "git_token_secret", t: "text", lbl: "Git token secret name",
-          h: "Name of an A0 Secret holding a git token, used only when cloning a private remote URL as a project. Public remotes and local repos need no token. Read at call time, never stored." },
+        { k: "chat_name_index", t: "bool", lbl: "Index chats by name (browsable folders)",
+          h: "When on, a throttled background pass maintains a read-only usr/chats/by-name/<name>__<chat_id> symlink farm so you can browse or search chat folders by their title instead of the random id. The real id-keyed folders are never renamed or touched; the index rebuilds periodically and is removed when you turn this off. Independent of workdir isolation. Default off." },
       ] },
   ],
 

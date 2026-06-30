@@ -49,8 +49,8 @@ or follow another instruction you give (merge it, push it, rename it…).
 - a local **git-repo path**,
 - a **git URL** → cloned as a normal A0 git project first (reusable for more worktrees), then branched.
 
-Private remotes need a git token: set it in A0 Secrets under the key named by the `git_token_secret`
-setting (default `GITHUB_TOKEN`). Public remotes and local repos/projects need no token.
+Private remotes need a git token: set it in A0 Secrets under the key `GITHUB_TOKEN`. Public remotes
+and local repos/projects need no token (so there's no setting for it).
 
 ## Using with A0 Swarm
 
@@ -96,14 +96,40 @@ uninstalling the plugin — returns A0 to the shared workdir with nothing left b
 > reset, or container restart; a chat with a live terminal at enable-time keeps the shared workdir
 > until then. New chats isolate immediately.
 
+### Self-cleanup of stranded folders
+
+A0 reaps chats by their in-memory context — deleting a chat removes its whole `usr/chats/<id>/`
+folder — but nothing in A0 scans the chats *directory*. So in a rare race a code-execution shell
+that's still alive can re-create an isolated `workdir/` **after** its chat was deleted, leaving an
+empty folder with no `chat.json` that no reaper ever sees. This plugin closes that gap: a throttled
+background pass sweeps such folders (only ones that carry our footprint — a `workdir/` with no
+`chat.json`, not a live chat, older than a 30-minute grace window) and, at the source, the isolation
+resolver no longer re-creates a workdir for a chat whose folder is already gone.
+
+## Browse chats by name (opt-in)
+
+Chat folders are named by a random id (`usr/chats/aB3dEf9k/`), which is awkward to search. Turn on
+**Index chats by name** (default **off**) and the plugin maintains a read-only symlink farm at
+`usr/chats/by-name/<title>__<chat_id> -> ../<chat_id>`, rebuilt periodically. You can then `ls`,
+`grep`, and `cd` through it by title:
+
+```
+ls usr/chats/by-name/ | grep -i fragrance      # find a chat by its name
+ls usr/chats/by-name/fragrance-pricing__aB3dEf9k/   # browse straight into the real folder
+```
+
+The real id-keyed folders are **never** renamed, moved, or written to — the index is a pure,
+disposable projection (the `__<chat_id>` suffix keeps same-named chats distinct and reversible).
+Turning the option off or uninstalling removes the `by-name/` folder.
+
 ## Configuration
 
 `default_config.yaml`:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `git_token_secret` | `GITHUB_TOKEN` | A0 Secret name holding a git token, used only when cloning a **private** remote URL. Read at call time, never stored. |
 | `isolate_chat_workdir` | `false` | Opt-in. When on, each chat with no explicit project gets its own `usr/chats/<chat_id>/workdir`. Effective immediately; real projects/worktrees unaffected. |
+| `chat_name_index` | `false` | Opt-in. When on, maintains a read-only `usr/chats/by-name/<title>__<chat_id>` symlink farm so chats are browsable by name. Real id-keyed folders untouched; removed when off or on uninstall. |
 
 ## Uninstalling
 

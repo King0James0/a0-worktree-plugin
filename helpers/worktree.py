@@ -59,6 +59,12 @@ def _repo_name_from_url(url: str) -> str:
     return "".join(c for c in tail if c.isalnum() or c in "._-") or "repo"
 
 
+# A0 Secret name read (at call time, never stored) ONLY to clone a PRIVATE remote URL as a worktree
+# project. A code constant rather than a config field — local repos/projects and public remotes need
+# no token. A legacy `git_token_secret` saved-config key is still honoured by tools/worktree.py.
+DEFAULT_TOKEN_SECRET = "GITHUB_TOKEN"
+
+
 def _secret(key: str | None) -> str | None:
     if not key:
         return None

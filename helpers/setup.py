@@ -49,6 +49,12 @@ def cleanup() -> None:
     except Exception as e:
         _log(f"cleanup() isolation unwrap failed (non-fatal): {e}")
     try:
+        from usr.plugins.a0_worktree.helpers import maintenance
+
+        maintenance.remove_name_index()  # remove the by-name symlink farm we maintained
+    except Exception as e:
+        _log(f"cleanup() name-index removal failed (non-fatal): {e}")
+    try:
         from usr.plugins.a0_worktree.helpers import worktree
 
         removed = worktree.cleanup_all_owned()

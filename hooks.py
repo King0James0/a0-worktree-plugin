@@ -26,4 +26,15 @@ def save_plugin_config(settings=None, default=None, **kwargs):
         isolation.refresh_enabled(cfg)    # flip on/off instantly from the incoming value
     except Exception:
         pass
+    try:
+        # Build or tear down the name-index farm the moment the toggle is saved — same instant
+        # behaviour as the isolation toggle (don't wait for the next job-loop maintenance tick).
+        from usr.plugins.a0_worktree.helpers import maintenance
+
+        if isinstance(cfg, dict) and cfg.get("chat_name_index"):
+            maintenance.rebuild_name_index()
+        else:
+            maintenance.remove_name_index()
+    except Exception:
+        pass
     return settings

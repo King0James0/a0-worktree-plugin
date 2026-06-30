@@ -29,10 +29,22 @@ iso._enabled = True   # simulate toggle ON (bypass reading installed config)
 cid = "ZZtest1234"
 syn = iso._ISO_PREFIX + cid
 
+# simulate a live context for this id so the liveness guard permits workdir creation (a real chat)
+iso._context_is_live = lambda _cid: True
+
 check("wrap installed (functions replaced)", projects.get_context_project_name is not orig_gcpn)
 check("flagged chat -> synthetic project name", projects.get_context_project_name(Ctx(cid)) == syn)
 check("synthetic name -> chat workdir path", projects.get_project_folder(syn) == os.path.join("/a0/usr/chats", cid, "workdir") or projects.get_project_folder(syn).replace("\\","/").endswith(f"usr/chats/{cid}/workdir"))
-check("chat workdir created on resolve", os.path.isdir(f"/a0/usr/chats/{cid}/workdir"))
+check("chat workdir created on resolve (live chat)", os.path.isdir(f"/a0/usr/chats/{cid}/workdir"))
+
+# liveness guard: a DEAD chat (folder gone, no live context) must NOT get its workdir re-created
+dead = "ZZdead5678"
+import shutil as _sh; _sh.rmtree(f"/a0/usr/chats/{dead}", ignore_errors=True)
+iso._context_is_live = lambda _cid: False
+dpath = projects.get_project_folder(iso._ISO_PREFIX + dead)
+check("dead chat -> path returned but workdir NOT re-created (orphan guard)",
+      dpath.replace("\\", "/").endswith(f"usr/chats/{dead}/workdir") and not os.path.isdir(f"/a0/usr/chats/{dead}/workdir"))
+iso._context_is_live = lambda _cid: True
 bd = projects.load_basic_project_data(syn)
 check("synthetic basic_data has file_structure", isinstance(bd, dict) and "file_structure" in bd and bd["file_structure"]["enabled"] is True)
 # the cascade: get_file_structure must list the CHAT folder (empty), proving _75 will too

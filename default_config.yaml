@@ -1,8 +1,9 @@
 # A0 Worktree defaults.
-
-# A0 Secret name holding a git token, used ONLY when cloning a PRIVATE remote URL as a project
-# (public remotes and local repos/projects need no token). Read at call time, never stored.
-git_token_secret: GITHUB_TOKEN
+#
+# Cloning a PRIVATE remote URL as a worktree project reads a git token from the A0 Secret named
+# `GITHUB_TOKEN` (a code constant — `DEFAULT_TOKEN_SECRET` in helpers/worktree.py — read at call
+# time, never stored). Local repos/projects and public remotes need no token, so there's no config
+# field for it. (A legacy `git_token_secret` key in a saved config is still honoured if present.)
 
 # Opt-in per-chat workdir isolation. When true, every chat that has NO explicit project gets its
 # own working directory at usr/chats/<chat_id>/workdir instead of the shared usr/workdir — the
@@ -11,3 +12,10 @@ git_token_secret: GITHUB_TOKEN
 # worktrees are never affected. Default OFF — enabling/disabling takes effect immediately, no
 # restart. (See helpers/isolation.py.)
 isolate_chat_workdir: false
+
+# Optional read-only name index for browsing chats by title. When true, a throttled background pass
+# keeps a usr/chats/by-name/<slug>__<chat_id> -> ../<chat_id> symlink farm, so you can find a chat
+# folder by its name instead of its random 8-char id. The real id-keyed folders are NEVER renamed,
+# moved, or written to; the index is rebuilt periodically and removed when this is turned off or on
+# uninstall. Independent of workdir isolation. Default OFF. (See helpers/maintenance.py.)
+chat_name_index: false

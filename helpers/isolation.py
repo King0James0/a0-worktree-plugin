@@ -62,14 +62,35 @@ def refresh_enabled(settings: dict | None = None) -> bool:
     return _enabled
 
 
+def _context_is_live(chat_id: str) -> bool:
+    """True if a live in-memory AgentContext owns this id. FAIL-SAFE to True when we can't tell, so a
+    real chat is never denied its workdir — the guard only ever WITHHOLDS creation on a definite miss."""
+    try:
+        from agent import AgentContext
+
+        return AgentContext.get(str(chat_id)) is not None
+    except Exception:
+        return True
+
+
 def _chat_workdir(chat_id: str) -> str | None:
-    """Absolute path to a chat's own workdir, created best-effort. None if the id is unsafe."""
+    """Absolute path to a chat's own workdir, created best-effort. None if the id is unsafe.
+
+    Liveness guard: a stale code-execution shell can call this AFTER its chat was deleted (the chat
+    folder is gone). Do NOT resurrect a dead chat's directory — re-creating it strands an orphan with
+    no chat.json that nothing reaps (helpers/maintenance.py exists to sweep ones already stranded).
+    Only create when the chat folder still exists (a real chat) OR a live context owns the id (a chat
+    mid-creation, before its first save). On a definite miss, return the path WITHOUT creating it.
+    """
     if not (isinstance(chat_id, str) and _SAFE_ID.match(chat_id)):
         return None
     try:
         from helpers import files
 
+        chat_dir = files.get_abs_path("usr/chats", chat_id)
         path = files.get_abs_path("usr/chats", chat_id, "workdir")
+        if not os.path.isdir(chat_dir) and not _context_is_live(chat_id):
+            return path  # deleted chat / orphaned caller — return path but do NOT create it
         try:
             os.makedirs(path, exist_ok=True)
         except Exception:

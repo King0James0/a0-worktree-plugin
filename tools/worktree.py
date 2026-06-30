@@ -28,7 +28,8 @@ class Worktree(Tool):
                       delete_branch=False, **kwargs):
         action = (action or "").strip().lower()
         cfg = _load_cfg(self.agent)
-        token_secret = cfg.get("git_token_secret") or None
+        # Token secret name is a code constant (no config field) — honour a legacy saved key if present.
+        token_secret = cfg.get("git_token_secret") or worktree.DEFAULT_TOKEN_SECRET
         ctx_id = self.agent.context.id
 
         if action == "create":
