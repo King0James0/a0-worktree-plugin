@@ -33,6 +33,12 @@ that resolves a flagged chat's workdir to `usr/chats/<chat_id>/workdir`. Publish
    (`_orig`) on any exception. An explicit project/worktree ALWAYS wins — isolation only fills the
    empty case. On any error, a future A0 rename, or the toggle OFF, behaviour reverts to the shared
    `usr/workdir`. Nothing this plugin does may break code execution for a non-isolated chat.
+   The v1.3.0 companion guards obey the same law: `activate_project` refusal and the
+   `SchedulerTaskList.add_task` strip act ONLY on `_ISO_PREFIX` names (which only this plugin
+   generates) and pass everything else to the original untouched; the resolvers HEAL rather than
+   raise on poisoned persisted state (a persisted iso name is ignored; a dead chat's folder resolves
+   to the SHARED workdir, never to a nonexistent path). All wrappers carry an `_a0wt_wrapper`
+   sentinel so a purge/reinstall can never double-wrap.
 5. **Constrain `chat_id` before it becomes a filesystem path.** `_chat_workdir` / the synthetic
    `_ISO_PREFIX` path MUST match `_SAFE_ID = ^[A-Za-z0-9_-]{1,128}$` before building
    `usr/chats/<id>/workdir`. Never interpolate an unvalidated context id into a path (traversal).
@@ -57,6 +63,14 @@ that resolves a flagged chat's workdir to `usr/chats/<chat_id>/workdir`. Publish
    chat is never denied). The optional `by-name/` symlink farm is READ-ONLY: it only ever creates
    symlinks under `usr/chats/by-name/`, never renames/moves/writes a real id-keyed folder; rebuild
    wipes that one dir (rmtree unlinks symlinks without following them into real chats).
+   The v1.3.0 **stale iso-ref sweep** (same pass) clears persisted `_a0wt_iso_*` project refs from
+   `usr/chats/*/chat.json` and `usr/scheduler/tasks.json` — a persisted iso ref is ALWAYS
+   illegitimate (isolation names are computed, never stored). Its good-neighbour rules: a LIVE
+   context is fixed ONLY through `projects.deactivate_project` (never edit its file behind its
+   back); a chat.json is edited directly ONLY when its id is definitely not in `AgentContext.all()`;
+   unknown liveness → touch nothing; only the `project` key inside `data`/`output_data` (and
+   `project_name`/`project_color` on task records) is ever modified, atomically (tmp + os.replace).
+   Every pass writes the durable marker `usr/a0_worktree-runtime/maintenance.json` (observability).
 
 ## Build discipline
 - **Framework-agnostic where it can be; one A0 seam per surface.** `helpers/worktree.py` and

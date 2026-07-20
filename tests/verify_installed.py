@@ -19,9 +19,17 @@ isolation.install_wrap()  # reads the REAL saved config (isolate_chat_workdir: t
 check("installed wrap reads real config -> enabled", isolation._enabled is True)
 syn = projects.get_context_project_name(Ctx("ABCxyz99"))
 check("enabled: flagged chat -> synthetic name", syn == isolation._ISO_PREFIX + "ABCxyz99")
+_real_liveness = isolation._context_is_live
+isolation._context_is_live = lambda _cid: True  # simulate a live chat so the workdir may be created
 folder = projects.get_project_folder(syn)
 check("synthetic -> chat workdir path", folder.replace("\\","/").endswith("usr/chats/ABCxyz99/workdir"))
 check("chat workdir created", os.path.isdir(folder))
+isolation._context_is_live = lambda _cid: False  # dead chat -> fail-soft to the SHARED workdir
+import shutil as _sh; _sh.rmtree("/a0/usr/chats/ABCxyz99", ignore_errors=True)
+dead_folder = projects.get_project_folder(syn)
+check("dead chat -> shared workdir fallback (fail-soft)",
+      dead_folder == isolation._default_workdir() and not os.path.isdir("/a0/usr/chats/ABCxyz99"))
+isolation._context_is_live = _real_liveness  # restore the module's real liveness check
 check("real project name still passes through", projects.get_project_folder("realproj").replace("\\","/").endswith("usr/projects/realproj"))
 
 isolation.uninstall_wrap()

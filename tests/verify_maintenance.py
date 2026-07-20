@@ -107,6 +107,74 @@ try:
     # remove_name_index tears down the farm only
     m.remove_name_index()
     check("remove_name_index deletes by-name only", not os.path.isdir(by_name) and os.path.isdir(os.path.join(chats, "AbCdEf12")))
+
+    # ---- stale iso-ref sweep (v1.3.0) ----
+    def _mk_chat_with_project(cid, project_data, project_output=None):
+        d = _mk_chat(chats, cid, with_json=True, name=cid)
+        with open(os.path.join(d, "chat.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": cid, "name": cid,
+                       "data": {"project": project_data},
+                       "output_data": {"project": project_output}}, f)
+        return os.path.join(d, "chat.json")
+
+    iso = m._ISO_PREFIX + "DeadChat99"
+    cj_stale = _mk_chat_with_project("StaleRef01", iso, {"name": iso, "color": "x"})   # both shapes
+    cj_live = _mk_chat_with_project("LiveRef001", iso)                                  # live → framework path
+    cj_real = _mk_chat_with_project("RealRef001", "myproj", {"name": "myproj"})        # real project → keep
+
+    tasks_path = os.path.join(tmp, "usr", "scheduler", "tasks.json")
+    os.makedirs(os.path.dirname(tasks_path), exist_ok=True)
+    with open(tasks_path, "w", encoding="utf-8") as f:
+        json.dump({"tasks": [
+            {"uuid": "t1", "name": "Poisoned Task", "project_name": iso, "project_color": "#abc"},
+            {"uuid": "t2", "name": "Clean Task", "project_name": "myproj", "project_color": "#def"},
+        ]}, f)
+
+    m._live_ids = lambda: {"LiveRef001"}
+    m._tasks_json_path = lambda: tasks_path
+
+    out = m.sweep_stale_iso_refs()
+
+    d_stale = json.load(open(cj_stale, encoding="utf-8"))
+    check("iso sweep clears a dead context's persisted iso ref (both shapes)",
+          "StaleRef01" in out["contexts"] and d_stale["data"]["project"] is None and d_stale["output_data"]["project"] is None)
+    check("iso sweep preserves the rest of the chat.json it edits", d_stale.get("name") == "StaleRef01")
+    d_live = json.load(open(cj_live, encoding="utf-8"))
+    check("iso sweep never edits a LIVE context's file directly (framework absent -> untouched)",
+          "LiveRef001" not in out["contexts"] and d_live["data"]["project"] == iso)
+    d_real = json.load(open(cj_real, encoding="utf-8"))
+    check("iso sweep never touches a real project ref", d_real["data"]["project"] == "myproj")
+
+    d_tasks = json.load(open(tasks_path, encoding="utf-8"))
+    t1, t2 = d_tasks["tasks"]
+    check("iso sweep clears a poisoned task record (name + color)",
+          out["tasks"] == ["Poisoned Task"] and t1["project_name"] is None and t1["project_color"] is None)
+    check("iso sweep leaves a clean task record alone", t2["project_name"] == "myproj" and t2["project_color"] == "#def")
+
+    # unknown liveness -> the chats leg stands its hand entirely
+    cj_stale2 = _mk_chat_with_project("StaleRef02", iso)
+    m._live_ids = lambda: None
+    out2 = m.sweep_stale_iso_refs()
+    d_stale2 = json.load(open(cj_stale2, encoding="utf-8"))
+    check("iso sweep stands its hand on unknown liveness", out2["contexts"] == [] and d_stale2["data"]["project"] == iso)
+    m._live_ids = lambda: {"LiveRef001"}
+
+    # idempotent: a second pass finds nothing left to clear
+    out3 = m.sweep_stale_iso_refs()
+    check("iso sweep is idempotent (second pass clears nothing new)",
+          "StaleRef01" not in out3["contexts"] and out3["tasks"] == [])
+
+    # ---- durable marker ----
+    rt = os.path.join(tmp, "usr", "a0_worktree-runtime")
+    os.makedirs(rt, exist_ok=True)
+    m._runtime_dir = lambda: rt
+    m.write_marker(sets={"last_run_at": "T0"}, increments={"runs_total": 1, "orphans_removed_total": 2})
+    m.write_marker(sets={"last_run_at": "T1"}, increments={"runs_total": 1, "orphans_removed_total": 0})
+    marker = json.load(open(os.path.join(rt, "maintenance.json"), encoding="utf-8"))
+    check("marker sets overwrite and increments accumulate",
+          marker["last_run_at"] == "T1" and marker["runs_total"] == 2 and marker["orphans_removed_total"] == 2)
+    m.remove_runtime_dir()
+    check("remove_runtime_dir deletes the marker dir", not os.path.isdir(rt))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

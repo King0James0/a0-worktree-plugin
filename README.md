@@ -106,6 +106,29 @@ background pass sweeps such folders (only ones that carry our footprint — a `w
 `chat.json`, not a live chat, older than a 30-minute grace window) and, at the source, the isolation
 resolver no longer re-creates a workdir for a chat whose folder is already gone.
 
+### Isolation names can never leak onto tasks (v1.3.0)
+
+The isolation "project" is an internal, computed-at-read-time name (`_a0wt_iso_<chat_id>`) that is
+never meant to be stored anywhere. It turned out A0's **scheduler** could still capture it: creating
+a scheduled task *from inside an isolated chat* copied that name onto the task record (the webui's
+create dialog defaults its project to the chat's active project), and the scheduler then re-applied
+it to the task's context on every run. Once the original chat was deleted, the task crashed at
+launch on the dangling path (`FileNotFoundError` during prompt preparation). v1.3.0 closes this
+three ways:
+
+- **Prevention** — the plugin refuses any attempt to persist an `_a0wt_iso_*` name: task creation
+  strips it from the new task record, and project activation onto any context is declined.
+- **Fail-soft** — if a stale reference exists anyway (state written before v1.3.0), the resolvers
+  heal it at read time: the name is ignored, and a dead chat's path falls back to the shared
+  workdir, so nothing ever crashes.
+- **Self-cleanup** — the same background pass that sweeps stranded folders also clears stale
+  `_a0wt_iso_*` references from saved chats and scheduler task records (live chats are fixed
+  through A0's own project deactivation; files are only edited for chats not currently in memory).
+
+Every maintenance pass records what it did in a durable marker at
+`usr/a0_worktree-runtime/maintenance.json` (run counts, folders swept, references cleared), so you
+can verify it's working at a glance.
+
 ## Browse chats by name (opt-in)
 
 Chat folders are named by a random id (`usr/chats/aB3dEf9k/`), which is awkward to search. Turn on

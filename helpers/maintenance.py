@@ -1,6 +1,7 @@
 """Background maintenance for a0_worktree (driven by the throttled job_loop/_60 extension).
 
-Two best-effort, fail-safe jobs:
+Three best-effort, fail-safe jobs (all runs recorded in a durable marker at
+`usr/a0_worktree-runtime/maintenance.json` — see write_marker):
 
   1. **Orphan sweep.** Remove a `usr/chats/<id>/` folder that per-chat isolation STRANDED: it has a
      `workdir/` (our footprint) but NO `chat.json`, is NOT a live in-memory `AgentContext`, and is
@@ -9,7 +10,12 @@ Two best-effort, fail-safe jobs:
      and the API-chat reaper both start from an in-memory context; NOTHING scans the chats directory,
      so a folder that has lost its `chat.json` is invisible to every cleanup path and lingers forever).
 
-  2. **Name index.** Maintain a read-only `usr/chats/by-name/<slug>__<id> -> ../<id>` symlink farm so
+  2. **Stale iso-ref sweep (v1.3.0).** Clear persisted `_a0wt_iso_*` project references from chat
+     contexts and scheduler task records — they are never legitimately stored (isolation names are
+     computed at read time) and a dangling one crashes prompt-prep for the context carrying it.
+     See sweep_stale_iso_refs for the full story and the good-neighbour rules.
+
+  3. **Name index.** Maintain a read-only `usr/chats/by-name/<slug>__<id> -> ../<id>` symlink farm so
      chats can be browsed/searched by their title instead of their random 8-char id. Rebuilt each
      pass; the real id-keyed folders are NEVER renamed, moved, or written to.
 
@@ -25,9 +31,11 @@ import os
 import re
 import shutil
 import time
+from datetime import datetime, timezone
 
 PLUGIN_NAME = "a0_worktree"
 _BY_NAME = "by-name"
+_ISO_PREFIX = "_a0wt_iso_"  # must match helpers/isolation.py
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 # Don't sweep a folder younger than this — avoids racing a chat that is mid-creation (workdir made
 # microseconds before its first chat.json save) on a clock where liveness can't yet be confirmed.
@@ -61,6 +69,167 @@ def _live_ids() -> set[str] | None:
         return {str(c.id) for c in AgentContext.all()}
     except Exception:
         return None
+
+
+def _tasks_json_path() -> str | None:
+    """Absolute path to the scheduler's tasks.json. None on failure (fail-safe → leg no-ops)."""
+    try:
+        from helpers import files
+
+        return files.get_abs_path("usr/scheduler/tasks.json")
+    except Exception:
+        return None
+
+
+def _runtime_dir() -> str | None:
+    """Durable runtime-state dir OUTSIDE the watched plugin tree (survives plugin reinstalls,
+    never triggers the watchdog). None on failure (fail-safe → marker writes no-op)."""
+    try:
+        from helpers import files
+
+        d = files.get_abs_path("usr", f"{PLUGIN_NAME}-runtime")
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        return None
+
+
+def write_marker(sets: dict | None = None, increments: dict | None = None) -> None:
+    """Merge values into the durable maintenance marker (usr/a0_worktree-runtime/maintenance.json):
+    `sets` overwrite, `increments` add to existing numeric counters. Proves the sweeps run —
+    ephemeral logs a host can swallow are not evidence. Best-effort; never raises."""
+    d = _runtime_dir()
+    if not d:
+        return
+    p = os.path.join(d, "maintenance.json")
+    cur: dict = {}
+    try:
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                cur = json.load(f) or {}
+    except Exception:
+        cur = {}
+    for k, v in (sets or {}).items():
+        cur[k] = v
+    for k, v in (increments or {}).items():
+        try:
+            cur[k] = int(cur.get(k, 0)) + int(v)
+        except Exception:
+            cur[k] = v
+    try:
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cur, f, indent=1)
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
+
+def remove_runtime_dir() -> None:
+    """Delete the runtime-state dir (on uninstall). Best-effort."""
+    try:
+        d = _runtime_dir()
+        if d and os.path.isdir(d):
+            shutil.rmtree(d)
+    except Exception:
+        pass
+
+
+def _iso_ref(value) -> str | None:
+    """The iso pseudo-project name inside a persisted project ref (string or {'name': ...} dict),
+    or None if the ref is empty / not iso-shaped."""
+    name = value if isinstance(value, str) else (value.get("name") if isinstance(value, dict) else None)
+    return name if isinstance(name, str) and name.startswith(_ISO_PREFIX) else None
+
+
+def sweep_stale_iso_refs() -> dict:
+    """Clear PERSISTED `_a0wt_iso_*` project references from chat contexts and scheduler task
+    records. Any persisted iso ref is illegitimate — isolation names are computed at read time and
+    never stored (see isolation.py); one only gets persisted when an outside writer copies it (the
+    task scheduler was one), and it dangles once its chat dies, crashing prompt-prep for whatever
+    context carries it. The v1.3.0 isolation guards stop NEW ones; this heals what already exists.
+
+    Good-neighbour rules: a LIVE context is fixed through the framework's own
+    `projects.deactivate_project` (memory + disk stay consistent); a chat.json is only edited
+    directly when its context is definitely NOT in memory; unknown liveness → touch nothing.
+    Returns {"contexts": [ids], "tasks": [names]}. Best-effort; never raises.
+    """
+    out: dict = {"contexts": [], "tasks": []}
+    live = _live_ids()
+    chats = _chats_dir()
+    if chats and os.path.isdir(chats) and live is not None:
+        try:
+            entries = os.listdir(chats)
+        except Exception:
+            entries = []
+        for entry in entries:
+            if entry == _BY_NAME or not _SAFE_ID.match(entry):
+                continue
+            cj = os.path.join(chats, entry, "chat.json")
+            if not os.path.isfile(cj):
+                continue
+            try:
+                with open(cj, encoding="utf-8") as f:
+                    text = f.read()
+            except Exception:
+                continue
+            if _ISO_PREFIX not in text:
+                continue
+            if entry in live:
+                # Live context: never touch its file behind its back — deactivate through the
+                # framework so the in-memory context and the persisted chat.json both update.
+                try:
+                    from agent import AgentContext
+                    from helpers import projects as _projects
+
+                    ctx = AgentContext.get(entry)
+                    raw = ctx.get_data("project") if ctx else None
+                    if _iso_ref(raw):
+                        _projects.deactivate_project(entry)
+                        out["contexts"].append(entry)
+                except Exception:
+                    pass
+                continue
+            try:
+                d = json.loads(text)
+                hit = False
+                for holder_key in ("data", "output_data"):
+                    holder = d.get(holder_key)
+                    if isinstance(holder, dict) and _iso_ref(holder.get("project")):
+                        holder["project"] = None
+                        hit = True
+                if hit:
+                    tmp = cj + ".a0wt-tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(d, f)
+                    os.replace(tmp, cj)
+                    out["contexts"].append(entry)
+            except Exception:
+                pass
+    tj = _tasks_json_path()
+    if tj and os.path.isfile(tj):
+        try:
+            with open(tj, encoding="utf-8") as f:
+                text = f.read()
+            if _ISO_PREFIX in text:
+                d = json.loads(text)
+                tasks = d.get("tasks") if isinstance(d, dict) else d
+                cleared: list[str] = []
+                if isinstance(tasks, list):
+                    for t in tasks:
+                        if isinstance(t, dict) and _iso_ref(t.get("project_name")):
+                            t["project_name"] = None
+                            t["project_color"] = None
+                            cleared.append(str(t.get("name") or t.get("uuid") or "?"))
+                if cleared:
+                    tmp = tj + ".a0wt-tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(d, f, indent=2)
+                    os.replace(tmp, tj)
+                    out["tasks"] = cleared
+        except Exception:
+            pass
+    return out
 
 
 def slugify(name: str | None) -> str:
@@ -171,7 +340,11 @@ def rebuild_name_index() -> int:
 
 
 def run(enable_name_index: bool) -> None:
-    """One maintenance pass: always sweep orphans; rebuild or tear down the name index per the toggle."""
+    """One maintenance pass: sweep stranded folders + stale iso refs (always); rebuild or tear
+    down the name index per the toggle; record everything in the durable marker."""
+    swept: list[str] = []
+    iso: dict = {"contexts": [], "tasks": []}
+    links: int | None = None
     try:
         swept = sweep_orphans()
         if swept:
@@ -179,9 +352,29 @@ def run(enable_name_index: bool) -> None:
     except Exception as e:
         _log(f"orphan sweep failed (non-fatal): {e}")
     try:
+        iso = sweep_stale_iso_refs()
+        if iso.get("contexts") or iso.get("tasks"):
+            _log(f"cleared stale isolation project refs — contexts: {iso['contexts']} tasks: {iso['tasks']}")
+    except Exception as e:
+        _log(f"iso-ref sweep failed (non-fatal): {e}")
+    try:
         if enable_name_index:
-            rebuild_name_index()
+            links = rebuild_name_index()
         else:
             remove_name_index()
     except Exception as e:
         _log(f"name index failed (non-fatal): {e}")
+    write_marker(
+        sets={
+            "last_run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "orphans_removed_last": swept,
+            "iso_cleared_last": iso,
+            "name_index_links": links,
+        },
+        increments={
+            "runs_total": 1,
+            "orphans_removed_total": len(swept),
+            "iso_contexts_cleared_total": len(iso.get("contexts") or []),
+            "iso_tasks_cleared_total": len(iso.get("tasks") or []),
+        },
+    )
