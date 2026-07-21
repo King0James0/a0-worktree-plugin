@@ -126,13 +126,85 @@ def write_marker(sets: dict | None = None, increments: dict | None = None) -> No
 
 
 def remove_runtime_dir() -> None:
-    """Delete the runtime-state dir (on uninstall). Best-effort."""
+    """Delete the runtime-state dir. Since v1.3.1 NOT called on uninstall — the dir carries the
+    config stash that must survive the A0 update's uninstall→install cycle. Kept as the manual /
+    future purge path. Best-effort."""
     try:
         d = _runtime_dir()
         if d and os.path.isdir(d):
             shutil.rmtree(d)
     except Exception:
         pass
+
+
+_CONFIG_STASH = "config-stash.json"
+
+
+def _plugin_dir() -> str | None:
+    """Absolute path to our plugin dir (where the framework writes config.json). None on failure."""
+    try:
+        from helpers import files
+
+        return files.get_abs_path("usr/plugins", PLUGIN_NAME)
+    except Exception:
+        return None
+
+
+def stash_config(cfg: dict | None = None) -> None:
+    """Config-survives-upgrade, write half (v1.3.1 — the vivy v1.8.10 pattern; motivated by the
+    2026-07-20 v1.3.0 install wiping both toggles + the by-name farm): A0's plugin UPDATE is
+    uninstall→install and DELETES the plugin dir INCLUDING config.json, losing every operator
+    setting. The runtime dir survives an update by design, so mirror the config there on every
+    save + at uninstall; `restore_config_stash` brings it back at install. `cfg` given (the save
+    hook's dict) is written as-is; else the on-disk config.json is copied. Best-effort."""
+    try:
+        d = _runtime_dir()
+        if not d:
+            return
+        if cfg is None:
+            pd = _plugin_dir()
+            src = os.path.join(pd, "config.json") if pd else ""
+            if not (src and os.path.exists(src)):
+                return
+            with open(src, encoding="utf-8") as f:
+                cfg = json.load(f)
+        if isinstance(cfg, dict) and cfg:
+            tmp = os.path.join(d, _CONFIG_STASH + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            os.replace(tmp, os.path.join(d, _CONFIG_STASH))
+    except Exception:
+        pass
+
+
+def restore_config_stash() -> dict | None:
+    """Config-survives-upgrade, restore half: when the plugin dir has NO config.json (a fresh
+    place-down after an update wiped it) and the surviving runtime dir holds a stash, restore it
+    BEFORE anything reads config — toggles come back without the manual re-enable. An EXISTING
+    config.json always wins (never overwritten); a corrupt stash is ignored (validated before
+    writing). Returns the restored dict (so install() can reconcile the farm/wrap), else None."""
+    try:
+        pd = _plugin_dir()
+        if not pd:
+            return None
+        dst = os.path.join(pd, "config.json")
+        if os.path.exists(dst):
+            return None
+        d = _runtime_dir()
+        src = os.path.join(d, _CONFIG_STASH) if d else ""
+        if not (src and os.path.exists(src)):
+            return None
+        with open(src, encoding="utf-8") as f:
+            cfg = json.load(f)  # validate BEFORE touching the plugin dir
+        if isinstance(cfg, dict) and cfg:
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            write_marker(sets={"config_restored_at": datetime.now(timezone.utc)
+                               .strftime("%Y-%m-%dT%H:%M:%SZ")})
+            return cfg
+    except Exception:
+        pass
+    return None
 
 
 def _iso_ref(value) -> str | None:

@@ -154,11 +154,22 @@ Turning the option off or uninstalling removes the `by-name/` folder.
 | `isolate_chat_workdir` | `false` | Opt-in. When on, each chat with no explicit project gets its own `usr/chats/<chat_id>/workdir`. Effective immediately; real projects/worktrees unaffected. |
 | `chat_name_index` | `false` | Opt-in. When on, maintains a read-only `usr/chats/by-name/<title>__<chat_id>` symlink farm so chats are browsable by name. Real id-keyed folders untouched; removed when off or on uninstall. |
 
+## Settings survive updates
+
+A0's plugin **update** is an uninstall→install cycle that deletes the plugin folder — config
+included. Since v1.3.1 your settings are mirrored to a small stash at
+`usr/a0_worktree-runtime/config-stash.json` (kept current on every save) and restored
+automatically on install, so an update no longer resets the toggles or tears down the by-name
+farm (it is rebuilt on install when the restored config has it on). Each restore is stamped in
+the maintenance marker (`config_restored_at`).
+
 ## Uninstalling
 
 Uninstall through the **Plugins UI**. The uninstall hook reclaims the worktree **checkouts** the
 plugin created (so nothing is left dangling) but **preserves their branches** — your committed work
-is never deleted by an uninstall.
+is never deleted by an uninstall. The small `usr/a0_worktree-runtime/` folder (maintenance marker +
+config stash) is deliberately left behind so a reinstall restores your settings — delete it
+manually if you want a fully clean removal.
 
 ## License
 

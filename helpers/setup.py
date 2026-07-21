@@ -52,7 +52,10 @@ def cleanup() -> None:
         from usr.plugins.a0_worktree.helpers import maintenance
 
         maintenance.remove_name_index()  # remove the by-name symlink farm we maintained
-        maintenance.remove_runtime_dir()  # remove the durable maintenance marker
+        # v1.3.1: the runtime dir is KEPT — it now carries the config stash that survives the
+        # A0 UPDATE path (uninstall→install deletes the plugin dir, config.json included). A
+        # true removal leaves only this small dir behind; delete usr/a0_worktree-runtime
+        # manually for a fully clean uninstall.
     except Exception as e:
         _log(f"cleanup() name-index removal failed (non-fatal): {e}")
     try:

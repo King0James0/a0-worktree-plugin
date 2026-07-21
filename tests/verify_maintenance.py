@@ -175,6 +175,41 @@ try:
           marker["last_run_at"] == "T1" and marker["runs_total"] == 2 and marker["orphans_removed_total"] == 2)
     m.remove_runtime_dir()
     check("remove_runtime_dir deletes the marker dir", not os.path.isdir(rt))
+
+    # ---- config stash-and-restore (v1.3.1 — config survives the update's uninstall→install) ----
+    rt2 = os.path.join(tmp, "usr", "a0_worktree-runtime2")
+    pd2 = os.path.join(tmp, "usr", "plugins", "a0_worktree")
+    os.makedirs(rt2, exist_ok=True)
+    os.makedirs(pd2, exist_ok=True)
+    m._runtime_dir = lambda: rt2
+    m._plugin_dir = lambda: pd2
+    cfg_p = os.path.join(pd2, "config.json")
+    with open(cfg_p, "w", encoding="utf-8") as f:
+        json.dump({"isolate_chat_workdir": True, "chat_name_index": True}, f)
+    m.stash_config()  # no-arg: copies the on-disk config.json
+    stash_p = os.path.join(rt2, "config-stash.json")
+    check("stash_config mirrors config.json into the runtime dir",
+          json.load(open(stash_p, encoding="utf-8"))["chat_name_index"] is True)
+    m.stash_config({"isolate_chat_workdir": False, "chat_name_index": True})  # save-hook shape
+    check("stash_config(cfg) keeps the stash current",
+          json.load(open(stash_p, encoding="utf-8"))["isolate_chat_workdir"] is False)
+    # existing config.json always wins — restore is a no-op
+    check("restore is a no-op when config.json exists", m.restore_config_stash() is None
+          and json.load(open(cfg_p, encoding="utf-8"))["isolate_chat_workdir"] is True)
+    # the update path: plugin dir wiped -> restore brings the stash back + returns it
+    os.remove(cfg_p)
+    restored = m.restore_config_stash()
+    check("restore rewrites config.json after an update wipe",
+          isinstance(restored, dict) and restored["chat_name_index"] is True
+          and json.load(open(cfg_p, encoding="utf-8"))["isolate_chat_workdir"] is False)
+    marker2 = json.load(open(os.path.join(rt2, "maintenance.json"), encoding="utf-8"))
+    check("restore stamps the durable marker", bool(marker2.get("config_restored_at")))
+    # corrupt stash is ignored and config.json is not created
+    os.remove(cfg_p)
+    with open(stash_p, "w", encoding="utf-8") as f:
+        f.write("{not json")
+    check("corrupt stash ignored (no config.json written)",
+          m.restore_config_stash() is None and not os.path.exists(cfg_p))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
